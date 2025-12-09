@@ -6,39 +6,23 @@ Automatically reviews pull requests using Claude AI
 
 import os
 import sys
-import json
 from anthropic import Anthropic
 
 def get_pr_diff():
-    """Get the PR diff from GitHub Actions environment or file"""
-    # In GitHub Actions, diff is passed via file
-    diff_file = os.getenv('GITHUB_EVENT_PATH', 'pr_diff.txt')
+    """Get the PR diff from the file created by GitHub Actions"""
+    diff_file = 'pr_diff.txt'
     
     try:
         if os.path.exists(diff_file):
             with open(diff_file, 'r') as f:
                 content = f.read()
-                # If it's a GitHub event, extract diff
-                try:
-                    event = json.loads(content)
-                    # This is simplified - in real use, fetch diff from PR
-                    return event.get('pull_request', {}).get('body', content)
-                except json.JSONDecodeError:
-                    return content
+                if not content or len(content.strip()) == 0:
+                    print("ERROR: Diff file is empty")
+                    return None
+                return content
         else:
-            print("No diff file found. Using sample diff.")
-            return """
-diff --git a/app.py b/app.py
-index 1234567..abcdefg 100644
---- a/app.py
-+++ b/app.py
-@@ -10,7 +10,7 @@ def calculate_total(items):
-     total = 0
-     for item in items:
--        total = total + item['price']
-+        total += item['price']
-     return total
-"""
+            print(f"ERROR: Diff file '{diff_file}' not found")
+            return None
     except Exception as e:
         print(f"Error reading diff: {e}")
         return None
@@ -55,18 +39,21 @@ def review_code(diff):
     
     prompt = f"""You are an expert code reviewer. Review the following code changes and provide:
 
-1. **Security Issues**: Any potential security vulnerabilities
-2. **Bug Risks**: Possible bugs or edge cases not handled
-3. **Code Quality**: Style issues, best practices, readability
-4. **Performance**: Any performance concerns
-5. **Suggestions**: Specific improvements with code examples
+1. **Security Issues**: Any potential security vulnerabilities (SQL injection, XSS, authentication issues, etc.)
+2. **Bug Risks**: Possible bugs or edge cases not handled (null checks, error handling, etc.)
+3. **Code Quality**: Style issues, best practices, readability improvements
+4. **Performance**: Any performance concerns or optimization opportunities
+5. **Suggestions**: Specific improvements with code examples where helpful
 
-Be constructive and specific. If the code looks good, say so!
+Be constructive, specific, and reference line numbers or function names where applicable.
+If the code looks good, acknowledge what was done well before suggesting improvements.
 
 CODE DIFF:
+```
 {diff}
+```
 
-Provide your review in clear sections with specific line references where applicable."""
+Provide your review in markdown format with clear sections."""
 
     try:
         response = client.messages.create(
@@ -95,25 +82,22 @@ def format_review_comment(review):
 """
     return comment
 
-def post_comment_to_github(comment):
-    """Post review comment to GitHub PR"""
+def save_review(comment):
+    """Save review to file for GitHub Actions to post"""
     
-    # In a real implementation, this would use GitHub API
-    # For now, we'll just output to a file that GitHub Actions can use
-    
-    output_file = os.getenv('GITHUB_OUTPUT', 'review_comment.md')
+    output_file = 'review_comment.md'
     
     try:
         with open(output_file, 'w') as f:
             f.write(comment)
-        print(f"Review saved to {output_file}")
+        print(f"✅ Review saved to {output_file}")
         print("\n" + "="*60)
         print("REVIEW PREVIEW:")
         print("="*60)
         print(comment)
         return True
     except Exception as e:
-        print(f"Error saving review: {e}")
+        print(f"❌ Error saving review: {e}")
         return False
 
 def main():
@@ -139,16 +123,16 @@ def main():
     
     print("✅ Review generated")
     
-    # Step 3: Format and post comment
+    # Step 3: Format and save comment
     print("\n💬 Formatting review comment...")
     comment = format_review_comment(review)
     
-    # Step 4: Save/post comment
-    print("\n📤 Posting review...")
-    if post_comment_to_github(comment):
-        print("✅ Review posted successfully!")
+    # Step 4: Save review
+    print("\n📤 Saving review...")
+    if save_review(comment):
+        print("✅ Review saved successfully!")
     else:
-        print("❌ Failed to post review")
+        print("❌ Failed to save review")
         sys.exit(1)
 
 if __name__ == "__main__":
