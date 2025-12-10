@@ -1,11 +1,14 @@
 name: AI Code Review
 
 on:
+  push:
+    branches: [ main ]
   pull_request:
     types: [opened, synchronize, reopened]
 
 jobs:
   review:
+    name: "AI Code Review"
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
