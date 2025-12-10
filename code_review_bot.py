@@ -2,43 +2,29 @@
 """
 AI Code Review Bot
 Automatically reviews pull requests using Claude AI
+Blocks merge if critical issues are found
 """
 
 import os
 import sys
-import json
+import re
 from anthropic import Anthropic
 
 def get_pr_diff():
-    """Get the PR diff from GitHub Actions environment or file"""
-    # In GitHub Actions, diff is passed via file
-    diff_file = os.getenv('GITHUB_EVENT_PATH', 'pr_diff.txt')
+    """Get the PR diff from the file created by GitHub Actions"""
+    diff_file = 'pr_diff.txt'
     
     try:
         if os.path.exists(diff_file):
             with open(diff_file, 'r') as f:
                 content = f.read()
-                # If it's a GitHub event, extract diff
-                try:
-                    event = json.loads(content)
-                    # This is simplified - in real use, fetch diff from PR
-                    return event.get('pull_request', {}).get('body', content)
-                except json.JSONDecodeError:
-                    return content
+                if not content or len(content.strip()) == 0:
+                    print("ERROR: Diff file is empty")
+                    return None
+                return content
         else:
-            print("No diff file found. Using sample diff.")
-            return """
-diff --git a/app.py b/app.py
-index 1234567..abcdefg 100644
---- a/app.py
-+++ b/app.py
-@@ -10,7 +10,7 @@ def calculate_total(items):
-     total = 0
-     for item in items:
--        total = total + item['price']
-+        total += item['price']
-     return total
-"""
+            print(f"ERROR: Diff file '{diff_file}' not found")
+            return None
     except Exception as e:
         print(f"Error reading diff: {e}")
         return None
@@ -53,20 +39,39 @@ def review_code(diff):
     
     client = Anthropic(api_key=api_key)
     
-    prompt = f"""You are an expert code reviewer. Review the following code changes and provide:
+    prompt = f"""You are an expert code reviewer performing a security-focused code review. Review the following code changes and provide:
 
-1. **Security Issues**: Any potential security vulnerabilities
-2. **Bug Risks**: Possible bugs or edge cases not handled
-3. **Code Quality**: Style issues, best practices, readability
-4. **Performance**: Any performance concerns
-5. **Suggestions**: Specific improvements with code examples
+1. **🔴 CRITICAL Issues** (Security vulnerabilities, data loss risks, authentication bypasses):
+   - SQL injection, XSS, CSRF vulnerabilities
+   - Authentication/authorization bypasses
+   - Sensitive data exposure
+   - Remote code execution risks
+   
+2. **🟡 WARNINGS** (Bugs, edge cases, performance issues):
+   - Unhandled exceptions
+   - Null pointer risks
+   - Memory leaks
+   - Race conditions
+   - Performance bottlenecks
 
-Be constructive and specific. If the code looks good, say so!
+3. **🟢 SUGGESTIONS** (Code quality, best practices):
+   - Style improvements
+   - Readability enhancements
+   - Better patterns
+   - Documentation needs
+
+**IMPORTANT:** Start each section with the emoji indicator (🔴, 🟡, or 🟢) so severity can be parsed.
+
+If you find CRITICAL issues, explicitly state "BLOCKING: This PR should not be merged until these issues are resolved."
+
+If the code looks good with only minor suggestions, state "✅ No blocking issues found. Safe to merge with optional improvements below."
 
 CODE DIFF:
+```
 {diff}
+```
 
-Provide your review in clear sections with specific line references where applicable."""
+Provide your review in markdown format with clear sections and specific line references."""
 
     try:
         response = client.messages.create(
@@ -83,37 +88,95 @@ Provide your review in clear sections with specific line references where applic
         print(f"Error calling Claude API: {e}")
         return None
 
-def format_review_comment(review):
-    """Format the review as a GitHub comment"""
+def analyze_severity(review):
+    """Analyze the review to determine if there are blocking issues"""
     
-    comment = f"""## 🤖 AI Code Review
+    # Check for explicit blocking statement
+    if "BLOCKING:" in review.upper() or "SHOULD NOT BE MERGED" in review.upper():
+        return "critical"
+    
+    # Count severity indicators
+    critical_count = len(re.findall(r'🔴|CRITICAL', review, re.IGNORECASE))
+    
+    # Look for specific security keywords
+    security_keywords = [
+        'sql injection', 'xss', 'csrf', 'security vulnerability',
+        'remote code execution', 'authentication bypass', 
+        'authorization bypass', 'sensitive data exposure',
+        'plaintext password', 'weak hash', 'insecure'
+    ]
+    
+    review_lower = review.lower()
+    security_issues = sum(1 for keyword in security_keywords if keyword in review_lower)
+    
+    if critical_count >= 2 or security_issues >= 3:
+        return "critical"
+    elif critical_count >= 1 or security_issues >= 1:
+        return "warning"
+    else:
+        return "pass"
 
-{review}
+def format_review_comment(review, severity):
+    """Format the review as a GitHub comment with severity indicator"""
+    
+    if severity == "critical":
+        header = """## 🔴 AI Code Review - BLOCKING ISSUES FOUND
+
+**⚠️ This PR has critical issues that must be resolved before merging.**
+
+"""
+    elif severity == "warning":
+        header = """## 🟡 AI Code Review - Issues Found
+
+**⚠️ Please review and address the issues below before merging.**
+
+"""
+    else:
+        header = """## ✅ AI Code Review - Approved
+
+**No blocking issues found. Optional suggestions below.**
+
+"""
+    
+    comment = f"""{header}{review}
+
+---
+### Review Summary
+- **Severity Level:** {severity.upper()}
+- **Merge Recommendation:** {'❌ DO NOT MERGE' if severity == 'critical' else '⚠️ Review Required' if severity == 'warning' else '✅ Safe to Merge'}
 
 ---
 *This review was automatically generated by Claude AI. Please use human judgment for final decisions.*
 """
     return comment
 
-def post_comment_to_github(comment):
-    """Post review comment to GitHub PR"""
+def save_review(comment, severity):
+    """Save review to file for GitHub Actions to post"""
     
-    # In a real implementation, this would use GitHub API
-    # For now, we'll just output to a file that GitHub Actions can use
-    
-    output_file = os.getenv('GITHUB_OUTPUT', 'review_comment.md')
+    output_file = 'review_comment.md'
+    severity_file = 'review_severity.txt'
     
     try:
+        # Save the comment
         with open(output_file, 'w') as f:
             f.write(comment)
-        print(f"Review saved to {output_file}")
+        
+        # Save the severity level
+        with open(severity_file, 'w') as f:
+            f.write(severity)
+        
+        print(f"✅ Review saved to {output_file}")
+        print(f"✅ Severity saved to {severity_file}")
         print("\n" + "="*60)
         print("REVIEW PREVIEW:")
         print("="*60)
         print(comment)
+        print("\n" + "="*60)
+        print(f"SEVERITY: {severity.upper()}")
+        print("="*60)
         return True
     except Exception as e:
-        print(f"Error saving review: {e}")
+        print(f"❌ Error saving review: {e}")
         return False
 
 def main():
@@ -139,17 +202,31 @@ def main():
     
     print("✅ Review generated")
     
-    # Step 3: Format and post comment
-    print("\n💬 Formatting review comment...")
-    comment = format_review_comment(review)
+    # Step 3: Analyze severity
+    print("\n📊 Analyzing severity...")
+    severity = analyze_severity(review)
+    print(f"✅ Severity level: {severity.upper()}")
     
-    # Step 4: Save/post comment
-    print("\n📤 Posting review...")
-    if post_comment_to_github(comment):
-        print("✅ Review posted successfully!")
-    else:
-        print("❌ Failed to post review")
+    # Step 4: Format comment
+    print("\n💬 Formatting review comment...")
+    comment = format_review_comment(review, severity)
+    
+    # Step 5: Save review
+    print("\n📤 Saving review...")
+    if not save_review(comment, severity):
+        print("❌ Failed to save review")
         sys.exit(1)
+    
+    # Step 6: Exit with appropriate code based on severity
+    if severity == "critical":
+        print("\n🔴 CRITICAL ISSUES FOUND - Failing workflow to block merge")
+        sys.exit(1)  # Exit code 1 = failure, blocks merge
+    elif severity == "warning":
+        print("\n🟡 WARNINGS FOUND - Workflow passes but review recommended")
+        sys.exit(0)  # You can change to sys.exit(1) to block warnings too
+    else:
+        print("\n✅ No blocking issues - Workflow passed")
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
