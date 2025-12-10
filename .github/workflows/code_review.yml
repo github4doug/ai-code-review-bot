@@ -10,6 +10,7 @@ jobs:
     permissions:
       pull-requests: write
       contents: read
+      statuses: write
     
     steps:
       - name: Checkout code
@@ -38,31 +39,40 @@ jobs:
           fi
       
       - name: Run AI Code Review
+        id: review
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python code_review_bot.py
+        continue-on-error: true
       
-      - name: Verify review file exists
+      - name: Read review severity
+        id: severity
         run: |
-          if [ ! -f review_comment.md ]; then
-            echo "ERROR: review_comment.md not found!"
-            exit 1
+          if [ -f review_severity.txt ]; then
+            SEVERITY=$(cat review_severity.txt)
+            echo "severity=$SEVERITY" >> $GITHUB_OUTPUT
+            echo "Review severity: $SEVERITY"
+          else
+            echo "severity=unknown" >> $GITHUB_OUTPUT
+            echo "Could not determine severity"
           fi
-          echo "Review file found, size: $(wc -c < review_comment.md) bytes"
       
       - name: Post review comment
-        if: success()
+        if: always()
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             
-            // Read the review comment
+            if (!fs.existsSync('review_comment.md')) {
+              console.log('⚠️ Review comment file not found');
+              return;
+            }
+            
             const comment = fs.readFileSync('review_comment.md', 'utf8');
             
-            // Post the comment to the PR
             await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
@@ -71,3 +81,20 @@ jobs:
             });
             
             console.log('✅ Review comment posted successfully!');
+      
+      - name: Check review result
+        run: |
+          SEVERITY="${{ steps.severity.outputs.severity }}"
+          
+          echo "Final severity: $SEVERITY"
+          
+          if [ "$SEVERITY" = "critical" ]; then
+            echo "❌ CRITICAL issues found - failing workflow to block merge"
+            exit 1
+          elif [ "$SEVERITY" = "warning" ]; then
+            echo "⚠️ Warnings found - but allowing merge (change to exit 1 to block)"
+            exit 0
+          else
+            echo "✅ No blocking issues found"
+            exit 0
+          fi
