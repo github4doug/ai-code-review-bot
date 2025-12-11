@@ -1,2 +1,17 @@
+# Core dependencies for AI Code Review Bot
 anthropic>=0.18.0
 requests>=2.31.0
+
+# Security dependencies for demo code
+bcrypt>=4.0.1
+
+# Note: The following are Python standard library (no installation needed):
+# - sqlite3 (built-in)
+# - secrets (built-in)
+# - re (built-in)
+# - logging (built-in)
+# - datetime (built-in)
+# - typing (built-in)
+# - contextlib (built-in)
+# - enum (built-in)
+# - threading (built-in)
