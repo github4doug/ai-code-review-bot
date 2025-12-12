@@ -103,13 +103,14 @@ def analyze_severity(review):
         'sql injection', 'xss', 'csrf', 'security vulnerability',
         'remote code execution', 'authentication bypass', 
         'authorization bypass', 'sensitive data exposure',
-        'plaintext password', 'weak hash', 'insecure'
+        'plaintext password', 'weak hash', 'insecure',
+        'md5', 'sha1', 'weak encryption', 'weak algorithm'
     ]
     
     review_lower = review.lower()
     security_issues = sum(1 for keyword in security_keywords if keyword in review_lower)
     
-    if critical_count >= 2 or security_issues >= 3:
+    if critical_count >= 2 or security_issues >= 2:
         return "critical"
     elif critical_count >= 1 or security_issues >= 1:
         return "warning"
