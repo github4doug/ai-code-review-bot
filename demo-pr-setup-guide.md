@@ -145,7 +145,7 @@ The bot should catch and comment on:
 - ✅ Add input validation
 - ✅ Implement proper email validation
 
-## 📸 Screenshots for Your Resume/Portfolio
+## 📸 Screenshots 
 
 Capture these screenshots:
 
@@ -204,7 +204,7 @@ git checkout -b feature/docker-setup
 4. **Customize the prompt** - show how you can tune it for different languages/frameworks
 5. **Add metrics** - track review time, issues found, false positives
 
-## 📊 Metrics to Track (For Resume)
+## 📊 Metrics to Track
 
 - ✅ Reviews completed: ~500+
 - ✅ Average review time: 15-30 seconds

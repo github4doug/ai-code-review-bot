@@ -135,7 +135,7 @@ def calculate_total(items: list[dict]) -> float:
 \`\`\`
 ```
 
-## 🎯 Resume-Worthy Highlights
+## 🎯 Worthy Highlights
 
 **Skills Demonstrated:**
 - ✅ LLM API Integration (Anthropic Claude)
